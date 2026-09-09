@@ -17,14 +17,16 @@ document.addEventListener('DOMContentLoaded', () => {
   const closeDrawer = document.querySelector('.close-drawer');
 
   function openMenu() {
-    mobileDrawer.classList.add('active');
-    drawerOverlay.classList.add('active');
+    if (mobileDrawer) mobileDrawer.classList.add('active');
+    if (drawerOverlay) drawerOverlay.classList.add('active');
+    document.body.classList.add('drawer-open');
     document.body.style.overflow = 'hidden'; // Prevent background scrolling
   }
 
   function closeMenu() {
-    mobileDrawer.classList.remove('active');
-    drawerOverlay.classList.remove('active');
+    if (mobileDrawer) mobileDrawer.classList.remove('active');
+    if (drawerOverlay) drawerOverlay.classList.remove('active');
+    document.body.classList.remove('drawer-open');
     document.body.style.overflow = '';
   }
 
@@ -89,6 +91,8 @@ document.addEventListener('DOMContentLoaded', () => {
       
       if (progress < 1) {
         requestAnimationFrame(update);
+      } else {
+        el.textContent = target.toLocaleString() + suffix;
       }
     }
     requestAnimationFrame(update);
@@ -103,20 +107,22 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!num.dataset.target) return;
             const target = parseInt(num.dataset.target, 10);
             if (isNaN(target)) return;
-            animateCounter(num, target, 2000);
+            animateCounter(num, target, 1800);
           });
           statsObserver.unobserve(entry.target);
         }
       });
     }, {
-      threshold: 0.2
+      threshold: 0.05,
+      rootMargin: '50px 0px 0px 0px'
     });
     statsObserver.observe(statsSection);
   }
 
-  // 6. FLOATING PARTICLES (HERO)
+  // 6. FLOATING PARTICLES (HERO) - Desktop only to save mobile battery & avoid jank
   const hero = document.getElementById('hero');
-  if (hero) {
+  const isMobileOrReducedMotion = window.innerWidth < 768 || window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (hero && !isMobileOrReducedMotion) {
     const particleCount = 12;
     const particles = [];
 
@@ -206,57 +212,53 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // 8. BEFORE/AFTER SLIDER
+  // 8. BEFORE/AFTER SLIDER (Universal Pointer & Touch Support)
   const sliders = document.querySelectorAll('.ba-container');
   sliders.forEach(slider => {
     const after = slider.querySelector('.ba-after');
     const handle = slider.querySelector('.ba-handle');
+    if (!after || !handle) return;
     let isDragging = false;
 
-    function startDrag(e) {
-      isDragging = true;
-      e.stopPropagation();
-    }
-
-    function stopDrag() {
-      isDragging = false;
-    }
-
-    function doDrag(e) {
-      if (!isDragging) return;
-      
+    function updateSliderPosition(clientX) {
       const rect = slider.getBoundingClientRect();
-      let clientX = e.clientX;
-      if (e.touches && e.touches.length > 0) {
-        clientX = e.touches[0].clientX;
-      }
-      
       let x = clientX - rect.left;
       x = Math.max(0, Math.min(x, rect.width));
-      
       const pct = (x / rect.width) * 100;
-      
-      // Update clip-path and handle position
-      // clip-path: inset(top right bottom left) -> we reveal from the left side (which is AFTER or BEFORE?)
-      // Let's look at CSS: .ba-after has clip-path: inset(0 0 0 50%) (meaning left half is clipped out, showing before).
-      // So if we inset the left coordinate, we show AFTER.
-      // So if handle is at 30%, we want to clip left 30% of AFTER.
       after.style.clipPath = `inset(0 0 0 ${pct}%)`;
       handle.style.left = `${pct}%`;
     }
 
-    // Attach listeners
-    handle.addEventListener('mousedown', startDrag);
-    document.addEventListener('mousemove', doDrag);
-    document.addEventListener('mouseup', stopDrag);
+    function onPointerDown(e) {
+      isDragging = true;
+      try {
+        slider.setPointerCapture(e.pointerId);
+      } catch (err) {}
+      updateSliderPosition(e.clientX);
+    }
 
-    // Touch support
-    handle.addEventListener('touchstart', startDrag, { passive: true });
-    document.addEventListener('touchmove', doDrag, { passive: true });
-    document.addEventListener('touchend', stopDrag);
+    function onPointerMove(e) {
+      if (!isDragging) return;
+      e.preventDefault();
+      updateSliderPosition(e.clientX);
+    }
+
+    function onPointerUp(e) {
+      if (!isDragging) return;
+      isDragging = false;
+      try {
+        slider.releasePointerCapture(e.pointerId);
+      } catch (err) {}
+    }
+
+    slider.addEventListener('pointerdown', onPointerDown);
+    slider.addEventListener('pointermove', onPointerMove);
+    slider.addEventListener('pointerup', onPointerUp);
+    slider.addEventListener('pointercancel', onPointerUp);
   });
 
-  // 9. TESTIMONIAL CAROUSEL
+  // 9. TESTIMONIAL CAROUSEL (With Touch Swipe Support)
+  const carouselContainer = document.querySelector('.testimonials-carousel') || document.querySelector('.testimonials-section');
   const slides = document.querySelectorAll('.testimonial-slide');
   const dots = document.querySelectorAll('.carousel-dots .dot');
   let currentSlide = 0;
@@ -275,21 +277,46 @@ document.addEventListener('DOMContentLoaded', () => {
   function startCarousel() {
     carouselInterval = setInterval(() => {
       showSlide(currentSlide + 1);
-    }, 4000);
+    }, 4500);
   }
 
   function stopCarousel() {
     clearInterval(carouselInterval);
   }
 
-  if (slides.length > 0 && dots.length > 0) {
-    dots.forEach((dot, idx) => {
-      dot.addEventListener('click', () => {
-        stopCarousel();
-        showSlide(idx);
-        startCarousel();
+  if (slides.length > 0) {
+    if (dots.length > 0) {
+      dots.forEach((dot, idx) => {
+        dot.addEventListener('click', () => {
+          stopCarousel();
+          showSlide(idx);
+          startCarousel();
+        });
       });
-    });
+    }
+
+    // Touch swipe support for mobile
+    if (carouselContainer) {
+      let touchStartX = 0;
+      carouselContainer.addEventListener('touchstart', (e) => {
+        touchStartX = e.changedTouches[0].screenX;
+        stopCarousel();
+      }, { passive: true });
+
+      carouselContainer.addEventListener('touchend', (e) => {
+        const touchEndX = e.changedTouches[0].screenX;
+        const diff = touchStartX - touchEndX;
+        if (Math.abs(diff) > 40) {
+          if (diff > 0) {
+            showSlide(currentSlide + 1); // Swipe left -> next
+          } else {
+            showSlide(currentSlide - 1); // Swipe right -> prev
+          }
+        }
+        startCarousel();
+      }, { passive: true });
+    }
+
     startCarousel();
   }
 
@@ -554,20 +581,24 @@ document.addEventListener('DOMContentLoaded', () => {
   document.querySelectorAll('a[href^="#"]').forEach(a => {
     a.addEventListener('click', function(e) {
       const href = this.getAttribute('href');
-      if (href === '#') return;
+      if (!href || href === '#' || !href.startsWith('#')) return;
       
-      const target = document.querySelector(href);
-      if (target) {
-        e.preventDefault();
-        closeMenu(); // Close mobile menu if open
-        const headerOffset = 80;
-        const elementPosition = target.getBoundingClientRect().top;
-        const offsetPosition = elementPosition + window.pageYOffset - headerOffset;
+      try {
+        const target = document.querySelector(href);
+        if (target) {
+          e.preventDefault();
+          closeMenu(); // Close mobile menu if open
+          const headerOffset = 80;
+          const elementPosition = target.getBoundingClientRect().top;
+          const offsetPosition = elementPosition + window.pageYOffset - headerOffset;
 
-        window.scrollTo({
-          top: offsetPosition,
-          behavior: 'smooth'
-        });
+          window.scrollTo({
+            top: offsetPosition,
+            behavior: 'smooth'
+          });
+        }
+      } catch (err) {
+        // Ignore invalid CSS selector in href
       }
     });
   });
